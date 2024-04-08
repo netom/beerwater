@@ -1,4 +1,3 @@
-use rand::random;
 use rand_distr::{Distribution, Normal};
 
 // Indexes of ions in the salt array
