@@ -31,7 +31,7 @@ const contributions: [[f32; NUM_IONS]; NUM_SALTS] = [
 ];
 
 // Size of step in each direction, g/l
-const EPS: f32 = 0.0005;
+const EPS: f32 = 0.0002;
 
 fn nudge(qin: &[f32; NUM_SALTS], qout: &mut [f32; NUM_SALTS]) {
     let normal = Normal::new(-1.0 * EPS, 1.0 * EPS).unwrap();
@@ -82,7 +82,7 @@ fn main() {
     conc(&best_quantities, &mut best_concentrations);
     let mut best_err: f32 = err(&target, &best_concentrations);
 
-    for i in 1..500001 {
+    for i in 1..200001 {
         nudge(&best_quantities, &mut try_quantities);
         conc(&try_quantities, &mut try_concentrations);
 
