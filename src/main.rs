@@ -66,10 +66,10 @@ fn conc(quantities: &[f32; NUM_SALTS], concentrations: &mut [f32; NUM_IONS]) {
 }
 
 // Water quantity in litres
-const q: f32 = 31.0;
+const q: f32 = 25.0;
 
 // Target concentrations
-const target: [f32; NUM_IONS] = [100.0, 15.0, 50.0, 80.0, 80.0, 250.0];
+const target: [f32; NUM_IONS] = [14.0, 10.0, 15.0, 39.0, 39.0, 25.0];
 
 fn main() {
     let mut best_concentrations: [f32; NUM_IONS] = [0.0; NUM_IONS];
