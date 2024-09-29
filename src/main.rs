@@ -32,6 +32,12 @@ const contributions: [[f32; NUM_IONS]; NUM_SALTS] = [
 // Size of step in each direction, g/l
 const EPS: f32 = 0.0002;
 
+// Water quantity in litres
+const q: f32 = 25.0;
+
+// Target concentrations
+const target: [f32; NUM_IONS] = [110.0, 15.0, 30.0, 80.0, 200.0, 50.0];
+
 fn nudge(qin: &[f32; NUM_SALTS], qout: &mut [f32; NUM_SALTS]) {
     let normal = Normal::new(-1.0 * EPS, 1.0 * EPS).unwrap();
     let mut rng = rand::thread_rng();
@@ -64,12 +70,6 @@ fn conc(quantities: &[f32; NUM_SALTS], concentrations: &mut [f32; NUM_IONS]) {
         }
     }
 }
-
-// Water quantity in litres
-const q: f32 = 25.0;
-
-// Target concentrations
-const target: [f32; NUM_IONS] = [14.0, 10.0, 15.0, 39.0, 39.0, 25.0];
 
 fn main() {
     let mut best_concentrations: [f32; NUM_IONS] = [0.0; NUM_IONS];
