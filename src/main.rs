@@ -36,7 +36,7 @@ const EPS: f32 = 0.0002;
 const q: f32 = 25.0;
 
 // Target concentrations
-const target: [f32; NUM_IONS] = [110.0, 15.0, 30.0, 80.0, 200.0, 50.0];
+const target: [f32; NUM_IONS] = [53.0, 12.0, 16.0, 51.0, 85.0, 50.0];
 
 fn nudge(qin: &[f32; NUM_SALTS], qout: &mut [f32; NUM_SALTS]) {
     let normal = Normal::new(-1.0 * EPS, 1.0 * EPS).unwrap();
