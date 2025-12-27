@@ -56,7 +56,8 @@ fn alkalinity(concentrations: &[f32; NUM_IONS]) -> f32 {
 fn err(c1: &[f32; NUM_IONS], c2: &[f32; NUM_IONS]) -> f32 {
     let mut sum: f32 = 0.0;
     for i in 0..NUM_IONS {
-        sum += f32::powf(c1[i] - c2[i], 2.0);
+        let diff = c1[i] - c2[i];
+        sum += diff * diff;
     }
     return sum;
 }
