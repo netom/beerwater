@@ -13,9 +13,9 @@ fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
 }
 
 // Alkalinity based on ion concentrations
-fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
+/*fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
     return concentrations[i_hco3] * 50.0 / 61.0;
-}
+}*/
 
 // Error function for concentrations
 fn err(c1: &Vec<f32>, c2: &Vec<f32>) -> f32 {
@@ -76,7 +76,23 @@ fn main() {
     let water_quantity: f32 = 25.0;
 
     // Target concentrations
-    let target = vec![60.0, 10.0, 0.0, 70.0, 80.0, 00.0];
+    let mut target = vec![0.0; salts.len()];
+
+    let file = File::open("target.txt").unwrap();
+
+    for line in BufReader::new(file)
+        .lines()
+        .map(|line: Result<String, io::Error>| line.expect("Could not read"))
+    {
+        let parts: Vec<&str> = line.as_str().split_whitespace().collect();
+
+        let ion: &str = parts[0];
+        let target_concentration: f32 = parts[1].parse().expect("Not a number");
+
+        let index = ions.iter().position(|v| v == ion).expect("Unknown ion");
+
+        target[index] = target_concentration;
+    }
 
     let mut best_concentrations: Vec<f32> = vec![0.0; ions.len()];
     let mut try_concentrations: Vec<f32> = vec![0.0; ions.len()];
@@ -92,7 +108,7 @@ fn main() {
 
     let mut best_err: f32 = err(&target, &best_concentrations);
 
-    for i in 1..400001 {
+    for i in 1..500001 {
         nudge(eps, &best_quantities, &mut try_quantities);
         conc(&contributions, &try_quantities, &mut try_concentrations);
 
