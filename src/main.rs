@@ -1,7 +1,10 @@
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
-pub use std::fs::{self, File};
-pub use std::io::{self, BufRead, BufReader};
+pub use std::{
+    fs::{self, File},
+    io::{self, BufRead, BufReader, Lines},
+    process::exit,
+};
 
 fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
     let normal = Normal::new(-1.0 * eps, 1.0 * eps).unwrap();
@@ -13,9 +16,9 @@ fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
 }
 
 // Alkalinity based on ion concentrations
-/*fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
+fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
     return concentrations[i_hco3] * 50.0 / 61.0;
-}*/
+}
 
 // Error function for concentrations
 fn err(c1: &Vec<f32>, c2: &Vec<f32>) -> f32 {
@@ -38,36 +41,150 @@ fn conc(contributions: &Vec<Vec<f32>>, quantities: &Vec<f32>, concentrations: &m
     }
 }
 
+fn file_lines_or_exit(file_name: &str, file_description: &str) -> Lines<BufReader<File>> {
+    match File::open(file_name) {
+        Ok(file) => return BufReader::new(file).lines(),
+        Err(io_error) => {
+            println!("Could not open {file_description} file {file_name}: {io_error}");
+            exit(1);
+        }
+    }
+}
+
+fn process_data_file_or_exit<F: FnMut(Option<Vec<&str>>) -> Option<Result<(), String>>>(
+    line_number: &mut u64,
+    lines: &mut Lines<BufReader<File>>,
+    file_name: &str,
+    file_description: &str,
+    mut processor: F,
+) {
+    for line_result in lines.by_ref() {
+        *line_number += 1;
+        let line;
+        match line_result {
+            Ok(line_) => line = line_,
+            Err(io_error) => {
+                println!(
+                    "Could not read {} file {} at position {}: {}.",
+                    file_description, file_name, line_number, io_error
+                );
+                exit(1);
+            }
+        }
+        let line: &str = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let line_parts: Vec<&str> = line.split_whitespace().collect();
+        match processor(Some(line_parts)) {
+            None => continue,
+            Some(Ok(())) => return,
+            Some(Err(error_message)) => {
+                println!(
+                    "Error reading {file_description} file {file_name} at line {line_number}: {error_message}."
+                );
+                exit(1);
+            }
+        }
+    }
+    match processor(None) {
+        None => {
+            println!("Unexpected end of {file_description} file {file_name}.")
+        }
+        Some(Ok(())) => return,
+        Some(Err(error_message)) => {
+            println!(
+                "Error reading {file_description} file {file_name} at line {line_number}: {error_message}."
+            );
+            exit(1);
+        }
+    }
+}
+
 fn main() {
-    let file = File::open("ion_contributions.txt").unwrap();
+    let ion_contributions_file_name = "ion_contributions.txt";
+    let ion_contributions_file_description = "ion contribution data";
 
-    // "lines" will contain all non-empty lines split at whitespace sequences
-    let lines: Vec<Vec<String>> = BufReader::new(file)
-        .lines()
-        .map(|line: Result<String, io::Error>| line.expect("Could not read"))
-        .map(|line: String| String::from(line.trim()))
-        .filter(|line: &String| !line.is_empty())
-        .map(|line: String| line.split_whitespace().map(|s| String::from(s)).collect())
-        .collect();
+    let mut ion_contribution_lines = file_lines_or_exit(
+        ion_contributions_file_name,
+        ion_contributions_file_description,
+    );
 
-    let ions: Vec<String>;
+    let mut ion_contributions_line_number: u64 = 0;
+
+    let mut maybe_hco3_index = None; // Index of the "HCO3-" ion, if exists
+    let mut ions: Vec<String> = Vec::new();
+    process_data_file_or_exit(
+        &mut ion_contributions_line_number,
+        &mut ion_contribution_lines,
+        ion_contributions_file_name,
+        ion_contributions_file_description,
+        |maybe_words| {
+            let words;
+            match maybe_words {
+                Some(some_words) => words = some_words, // We've got some words!
+                None => return None,                    // Unexpected end of file
+            }
+
+            /* "words" contains the first non-empty,
+             *  non-comment line, these are our ions */
+            let mut ion_index = 0;
+            for word in words {
+                ions.push(String::from(word));
+                if word.eq("HCO3-") {
+                    maybe_hco3_index = Some(ion_index);
+                }
+                ion_index += 1;
+            }
+            return Some(Ok(())); // We're done.
+        },
+    );
+
     let mut salts: Vec<String> = Vec::new();
     let mut contributions: Vec<Vec<f32>> = Vec::new();
+    process_data_file_or_exit(
+        &mut ion_contributions_line_number,
+        &mut ion_contribution_lines,
+        ion_contributions_file_name,
+        ion_contributions_file_description,
+        |maybe_words| {
+            let words;
+            match maybe_words {
+                Some(some_words) => words = some_words, // We've got some words!
+                None => return Some(Ok(())), // End of file, done reading ion contributions
+            }
 
-    ions = lines[0].clone();
+            /* "words" now contain non-empty, non-comment lines,
+             * these are our ion contributions of salts. */
+            if words.len() != ions.len() + 1 {
+                return Some(Err(
+                    "word count should be the number of ions plus one".to_string()
+                ));
+            }
 
-    for i in 1..lines.len() {
-        salts.push(lines[i][0].clone());
-        contributions.push(
-            lines[i]
-                .iter()
-                .skip(1)
-                .map(|v| v.parse().expect("Not a number"))
-                .collect(),
-        );
-    }
+            let salt = words[0].to_string();
+            let mut contributions_for_this_salt: Vec<f32> = Vec::new();
 
-    drop(lines);
+            salts.push(salt);
+
+            let mut field_counter = 1;
+            for contribution in words.iter().skip(1) {
+                field_counter += 1;
+                match contribution.parse() {
+                    Ok(value) => contributions_for_this_salt.push(value),
+                    Err(parse_error) => {
+                        return Some(Err(format!(
+                            "parse error at field {field_counter}: {parse_error}"
+                        )
+                        .to_string()))
+                    }
+                }
+            }
+            contributions.push(contributions_for_this_salt);
+
+            return None; // We'd like to have some more please.
+        },
+    );
 
     // Size of step in each direction, g/l
     let eps: f32 = 0.0002;
@@ -75,24 +192,36 @@ fn main() {
     // Water quantity in litres
     let water_quantity: f32 = 25.0;
 
-    // Target concentrations
+    let target_file_name = "target.txt";
+    let target_file_description = "target concentration data";
+
+    let mut target_lines = file_lines_or_exit(target_file_name, target_file_description);
+
+    let mut target_line_number: u64 = 0;
+
     let mut target = vec![0.0; salts.len()];
 
-    let file = File::open("target.txt").unwrap();
+    process_data_file_or_exit(
+        &mut target_line_number,
+        &mut target_lines,
+        target_file_name,
+        target_file_description,
+        |maybe_words| {
+            let words;
+            match maybe_words {
+                Some(some_words) => words = some_words, // We've got some words!
+                None => return Some(Ok(())), // End of file, done reading ion contributions
+            }
 
-    for line in BufReader::new(file)
-        .lines()
-        .map(|line: Result<String, io::Error>| line.expect("Could not read"))
-    {
-        let parts: Vec<&str> = line.as_str().split_whitespace().collect();
+            let ion: &str = words[0];
+            let target_concentration: f32 = words[1].parse().expect("Not a number");
 
-        let ion: &str = parts[0];
-        let target_concentration: f32 = parts[1].parse().expect("Not a number");
+            let index = ions.iter().position(|v| v == ion).expect("Unknown ion");
 
-        let index = ions.iter().position(|v| v == ion).expect("Unknown ion");
-
-        target[index] = target_concentration;
-    }
+            target[index] = target_concentration;
+            return None;
+        },
+    );
 
     let mut best_concentrations: Vec<f32> = vec![0.0; ions.len()];
     let mut try_concentrations: Vec<f32> = vec![0.0; ions.len()];
@@ -140,6 +269,17 @@ fn main() {
     println!("");
     for i in 0..ions.len() {
         println!("{} {}", ions[i], best_concentrations[i]);
+    }
+
+    println!("");
+    match maybe_hco3_index {
+        Some(hco3_index) => {
+            let result_alkalinity = alkalinity(&best_concentrations, hco3_index);
+            println!("Alkalinity: {result_alkalinity:.3}");
+        }
+        None => {
+            println!("No HCO3 ion present, cannot calculate alkalinity.")
+        }
     }
 
     println!("");
