@@ -171,12 +171,18 @@ fn main() {
             for contribution in words.iter().skip(1) {
                 field_counter += 1;
                 match contribution.parse() {
-                    Ok(value) => contributions_for_this_salt.push(value),
+                    Ok(value) => {
+                        if value < 0.0 {
+                            return Some(Err(format!(
+                                "ion contribution at field {field_counter} is negative"
+                            )));
+                        }
+                        contributions_for_this_salt.push(value);
+                    }
                     Err(parse_error) => {
                         return Some(Err(format!(
                             "parse error at field {field_counter}: {parse_error}"
-                        )
-                        .to_string()))
+                        )))
                     }
                 }
             }
@@ -213,12 +219,34 @@ fn main() {
                 None => return Some(Ok(())), // End of file, done reading ion contributions
             }
 
+            if words.len() != 2 {
+                return Some(Err("the number of fields must be exactly 2".to_string()));
+            }
+
             let ion: &str = words[0];
-            let target_concentration: f32 = words[1].parse().expect("Not a number");
+            let target_concentration: f32;
+            match words[1].parse() {
+                Ok(value) => {
+                    if value < 0.0 {
+                        return Some(Err("target concentration is negative".to_string()));
+                    }
+                    target_concentration = value;
+                }
+                Err(parse_error) => {
+                    return Some(Err(format!(
+                        "error parsing target concentration: {parse_error}"
+                    )));
+                }
+            }
 
-            let index = ions.iter().position(|v| v == ion).expect("Unknown ion");
+            let ion_index;
+            match ions.iter().position(|v| v == ion) {
+                Some(value) => ion_index = value,
+                None => return Some(Err(format!("unkown ion: {ion}"))),
+            }
 
-            target[index] = target_concentration;
+            target[ion_index] = target_concentration;
+
             return None;
         },
     );
@@ -259,10 +287,6 @@ fn main() {
     for i in 0..ions.len() {
         println!("{} {}", ions[i], target[i]);
     }
-
-    //best_quantities = np.round(best_quantities, decimals = 3);
-    //best_concentrations = np.sum(contributions * best_quantities, axis = 0);
-    //conc(&best_quantities, &mut best_concentrations);
 
     println!("");
     println!("Achieved concentrations:");
