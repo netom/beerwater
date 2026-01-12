@@ -6,6 +6,13 @@ pub use std::{
     process::exit,
 };
 
+#[derive(Clone, Debug)]
+enum Constraint {
+    Exact(f32),           // Single target value
+    Range(f32, f32),      // Min and max (inclusive)
+    Unconstrained,        // Any value is acceptable
+}
+
 fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
     let normal = Normal::new(-1.0 * eps, 1.0 * eps).unwrap();
     let mut rng = rand::rng();
@@ -20,13 +27,29 @@ fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
     return concentrations[i_hco3] * 50.0 / 61.0;
 }
 
-// Error function for concentrations
-fn err(c1: &Vec<f32>, c2: &Vec<f32>) -> f32 {
+// Error function for concentrations against constraints
+fn err(constraints: &Vec<Constraint>, concentrations: &Vec<f32>) -> f32 {
     let mut sum: f32 = 0.0;
-    for i in 0..c1.len() {
-        // TODO: bounds?
-        let diff = c1[i] - c2[i];
-        sum += diff * diff;
+    for i in 0..constraints.len() {
+        let error_contribution = match &constraints[i] {
+            Constraint::Exact(target) => {
+                let diff = concentrations[i] - target;
+                diff * diff
+            }
+            Constraint::Range(min, max) => {
+                if concentrations[i] < *min {
+                    let diff = concentrations[i] - min;
+                    diff * diff
+                } else if concentrations[i] > *max {
+                    let diff = concentrations[i] - max;
+                    diff * diff
+                } else {
+                    0.0 // Within range, no error
+                }
+            }
+            Constraint::Unconstrained => 0.0, // No constraint, no error
+        };
+        sum += error_contribution;
     }
     return sum;
 }
@@ -205,7 +228,7 @@ fn main() {
 
     let mut target_line_number: u64 = 0;
 
-    let mut target = vec![0.0; salts.len()];
+    let mut constraints = vec![Constraint::Unconstrained; ions.len()];
 
     process_data_file_or_exit(
         &mut target_line_number,
@@ -219,25 +242,69 @@ fn main() {
                 None => return Some(Ok(())), // End of file, done reading ion contributions
             }
 
-            if words.len() != 2 {
-                return Some(Err("the number of fields must be exactly 2".to_string()));
+            if words.len() < 2 {
+                return Some(Err("the number of fields must be at least 2".to_string()));
             }
 
             let ion: &str = words[0];
-            let target_concentration: f32;
-            match words[1].parse() {
-                Ok(value) => {
-                    if value < 0.0 {
-                        return Some(Err("target concentration is negative".to_string()));
+
+            let constraint = if words[1] == "*" {
+                // Unconstrained
+                Constraint::Unconstrained
+            } else if words.len() == 4 && words[2] == "-" {
+                // Range format: "ion min - max"
+                let min_value: f32 = match words[1].parse() {
+                    Ok(value) => {
+                        if value < 0.0 {
+                            return Some(Err("minimum value is negative".to_string()));
+                        }
+                        value
                     }
-                    target_concentration = value;
+                    Err(parse_error) => {
+                        return Some(Err(format!(
+                            "error parsing minimum value: {parse_error}"
+                        )));
+                    }
+                };
+
+                let max_value: f32 = match words[3].parse() {
+                    Ok(value) => {
+                        if value < 0.0 {
+                            return Some(Err("maximum value is negative".to_string()));
+                        }
+                        value
+                    }
+                    Err(parse_error) => {
+                        return Some(Err(format!(
+                            "error parsing maximum value: {parse_error}"
+                        )));
+                    }
+                };
+
+                if min_value > max_value {
+                    return Some(Err("minimum value is greater than maximum value".to_string()));
                 }
-                Err(parse_error) => {
-                    return Some(Err(format!(
-                        "error parsing target concentration: {parse_error}"
-                    )));
-                }
-            }
+
+                Constraint::Range(min_value, max_value)
+            } else if words.len() == 2 {
+                // Exact value format: "ion value"
+                let target_concentration: f32 = match words[1].parse() {
+                    Ok(value) => {
+                        if value < 0.0 {
+                            return Some(Err("target concentration is negative".to_string()));
+                        }
+                        value
+                    }
+                    Err(parse_error) => {
+                        return Some(Err(format!(
+                            "error parsing target concentration: {parse_error}"
+                        )));
+                    }
+                };
+                Constraint::Exact(target_concentration)
+            } else {
+                return Some(Err("invalid constraint format (expected 'ion value', 'ion min - max', or 'ion *')".to_string()));
+            };
 
             let ion_index;
             match ions.iter().position(|v| v == ion) {
@@ -245,7 +312,7 @@ fn main() {
                 None => return Some(Err(format!("unkown ion: {ion}"))),
             }
 
-            target[ion_index] = target_concentration;
+            constraints[ion_index] = constraint;
 
             return None;
         },
@@ -263,13 +330,13 @@ fn main() {
 
     conc(&contributions, &best_quantities, &mut best_concentrations);
 
-    let mut best_err: f32 = err(&target, &best_concentrations);
+    let mut best_err: f32 = err(&constraints, &best_concentrations);
 
     for i in 1..500001 {
         nudge(eps, &best_quantities, &mut try_quantities);
         conc(&contributions, &try_quantities, &mut try_concentrations);
 
-        let try_err = err(&target, &try_concentrations);
+        let try_err = err(&constraints, &try_concentrations);
 
         if try_err < best_err {
             best_err = try_err;
@@ -282,17 +349,40 @@ fn main() {
         }
     }
     println!("");
-    println!("Target concentrations:");
+    println!("Target constraints:");
     println!("");
     for i in 0..ions.len() {
-        println!("{} {}", ions[i], target[i]);
+        let constraint_str = match &constraints[i] {
+            Constraint::Exact(value) => format!("{}", value),
+            Constraint::Range(min, max) => format!("{} - {}", min, max),
+            Constraint::Unconstrained => "*".to_string(),
+        };
+        println!("{} {}", ions[i], constraint_str);
     }
 
     println!("");
     println!("Achieved concentrations:");
     println!("");
     for i in 0..ions.len() {
-        println!("{} {}", ions[i], best_concentrations[i]);
+        let achieved = best_concentrations[i];
+        let status = match &constraints[i] {
+            Constraint::Exact(target) => {
+                if (achieved - target).abs() < 1.0 {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            }
+            Constraint::Range(min, max) => {
+                if achieved >= *min && achieved <= *max {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            }
+            Constraint::Unconstrained => "✓",
+        };
+        println!("{} {} {}", ions[i], achieved, status);
     }
 
     println!("");
