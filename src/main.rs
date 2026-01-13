@@ -8,9 +8,9 @@ pub use std::{
 
 #[derive(Clone, Debug)]
 enum Constraint {
-    Exact(f32),           // Single target value
-    Range(f32, f32),      // Min and max (inclusive)
-    Unconstrained,        // Any value is acceptable
+    Exact(usize, f32),                 // ion_index, target value
+    Range(usize, f32, f32),            // ion_index, min, max (inclusive)
+    Ratio(usize, usize, f32),          // ion1_index, ion2_index, target_ratio (ion1/ion2)
 }
 
 fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
@@ -30,27 +30,42 @@ fn alkalinity(concentrations: &Vec<f32>, i_hco3: usize) -> f32 {
 // Error function for concentrations against constraints
 fn err(constraints: &Vec<Constraint>, concentrations: &Vec<f32>) -> f32 {
     let mut sum: f32 = 0.0;
-    for i in 0..constraints.len() {
-        let error_contribution = match &constraints[i] {
-            Constraint::Exact(target) => {
-                let diff = concentrations[i] - target;
+
+    for constraint in constraints {
+        let error_contribution = match constraint {
+            Constraint::Exact(ion_index, target) => {
+                let diff = concentrations[*ion_index] - target;
                 diff * diff
             }
-            Constraint::Range(min, max) => {
-                if concentrations[i] < *min {
-                    let diff = concentrations[i] - min;
+            Constraint::Range(ion_index, min, max) => {
+                let conc = concentrations[*ion_index];
+                if conc < *min {
+                    let diff = conc - min;
                     diff * diff
-                } else if concentrations[i] > *max {
-                    let diff = concentrations[i] - max;
+                } else if conc > *max {
+                    let diff = conc - max;
                     diff * diff
                 } else {
                     0.0 // Within range, no error
                 }
             }
-            Constraint::Unconstrained => 0.0, // No constraint, no error
+            Constraint::Ratio(ion1_index, ion2_index, target_ratio) => {
+                let ion1_conc = concentrations[*ion1_index];
+                let ion2_conc = concentrations[*ion2_index];
+
+                // If denominator is very small, penalize heavily
+                if ion2_conc < 0.01 {
+                    10000.0
+                } else {
+                    let actual_ratio = ion1_conc / ion2_conc;
+                    let diff = actual_ratio - target_ratio;
+                    diff * diff
+                }
+            }
         };
         sum += error_contribution;
     }
+
     return sum;
 }
 
@@ -228,7 +243,7 @@ fn main() {
 
     let mut target_line_number: u64 = 0;
 
-    let mut constraints = vec![Constraint::Unconstrained; ions.len()];
+    let mut constraints: Vec<Constraint> = Vec::new();
 
     process_data_file_or_exit(
         &mut target_line_number,
@@ -246,11 +261,52 @@ fn main() {
                 return Some(Err("the number of fields must be at least 2".to_string()));
             }
 
+            // Check if this is a ratio constraint: "ion1 : ion2 value"
+            if words.len() == 4 && words[1] == ":" {
+                let ion1: &str = words[0];
+                let ion2: &str = words[2];
+
+                let ion1_index;
+                match ions.iter().position(|v| v == ion1) {
+                    Some(value) => ion1_index = value,
+                    None => return Some(Err(format!("unknown ion: {ion1}"))),
+                }
+
+                let ion2_index;
+                match ions.iter().position(|v| v == ion2) {
+                    Some(value) => ion2_index = value,
+                    None => return Some(Err(format!("unknown ion: {ion2}"))),
+                }
+
+                let target_ratio: f32 = match words[3].parse() {
+                    Ok(value) => {
+                        if value < 0.0 {
+                            return Some(Err("target ratio is negative".to_string()));
+                        }
+                        value
+                    }
+                    Err(parse_error) => {
+                        return Some(Err(format!(
+                            "error parsing target ratio: {parse_error}"
+                        )));
+                    }
+                };
+
+                constraints.push(Constraint::Ratio(ion1_index, ion2_index, target_ratio));
+                return None;
+            }
+
             let ion: &str = words[0];
 
-            let constraint = if words[1] == "*" {
-                // Unconstrained
-                Constraint::Unconstrained
+            let ion_index;
+            match ions.iter().position(|v| v == ion) {
+                Some(value) => ion_index = value,
+                None => return Some(Err(format!("unknown ion: {ion}"))),
+            }
+
+            if words[1] == "*" {
+                // Unconstrained - don't add any constraint
+                return None;
             } else if words.len() == 4 && words[2] == "-" {
                 // Range format: "ion min - max"
                 let min_value: f32 = match words[1].parse() {
@@ -285,7 +341,7 @@ fn main() {
                     return Some(Err("minimum value is greater than maximum value".to_string()));
                 }
 
-                Constraint::Range(min_value, max_value)
+                constraints.push(Constraint::Range(ion_index, min_value, max_value));
             } else if words.len() == 2 {
                 // Exact value format: "ion value"
                 let target_concentration: f32 = match words[1].parse() {
@@ -301,18 +357,10 @@ fn main() {
                         )));
                     }
                 };
-                Constraint::Exact(target_concentration)
+                constraints.push(Constraint::Exact(ion_index, target_concentration));
             } else {
-                return Some(Err("invalid constraint format (expected 'ion value', 'ion min - max', or 'ion *')".to_string()));
-            };
-
-            let ion_index;
-            match ions.iter().position(|v| v == ion) {
-                Some(value) => ion_index = value,
-                None => return Some(Err(format!("unkown ion: {ion}"))),
+                return Some(Err("invalid constraint format (expected 'ion value', 'ion min - max', 'ion *', or 'ion1 : ion2 ratio')".to_string()));
             }
-
-            constraints[ion_index] = constraint;
 
             return None;
         },
@@ -351,38 +399,77 @@ fn main() {
     println!("");
     println!("Target constraints:");
     println!("");
-    for i in 0..ions.len() {
-        let constraint_str = match &constraints[i] {
-            Constraint::Exact(value) => format!("{}", value),
-            Constraint::Range(min, max) => format!("{} - {}", min, max),
-            Constraint::Unconstrained => "*".to_string(),
-        };
-        println!("{} {}", ions[i], constraint_str);
+
+    // Display ion constraints
+    for constraint in &constraints {
+        match constraint {
+            Constraint::Exact(ion_index, target) => {
+                println!("{} {}", ions[*ion_index], target);
+            }
+            Constraint::Range(ion_index, min, max) => {
+                println!("{} {} - {}", ions[*ion_index], min, max);
+            }
+            Constraint::Ratio(_, _, _) => {
+                // Skip ratio constraints for now, display them separately
+            }
+        }
+    }
+
+    // Display ratio constraints
+    for constraint in &constraints {
+        if let Constraint::Ratio(ion1_index, ion2_index, target_ratio) = constraint {
+            println!("{} : {} {}", ions[*ion1_index], ions[*ion2_index], target_ratio);
+        }
     }
 
     println!("");
     println!("Achieved concentrations:");
     println!("");
-    for i in 0..ions.len() {
-        let achieved = best_concentrations[i];
-        let status = match &constraints[i] {
-            Constraint::Exact(target) => {
-                if (achieved - target).abs() < 1.0 {
+
+    // Display achieved ion concentrations
+    for constraint in &constraints {
+        match constraint {
+            Constraint::Exact(ion_index, target) => {
+                let achieved = best_concentrations[*ion_index];
+                let status = if (achieved - target).abs() < 1.0 {
                     "✓"
                 } else {
                     "✗"
-                }
+                };
+                println!("{} {} {}", ions[*ion_index], achieved, status);
             }
-            Constraint::Range(min, max) => {
-                if achieved >= *min && achieved <= *max {
+            Constraint::Range(ion_index, min, max) => {
+                let achieved = best_concentrations[*ion_index];
+                let status = if achieved >= *min && achieved <= *max {
                     "✓"
                 } else {
                     "✗"
-                }
+                };
+                println!("{} {} {}", ions[*ion_index], achieved, status);
             }
-            Constraint::Unconstrained => "✓",
-        };
-        println!("{} {} {}", ions[i], achieved, status);
+            Constraint::Ratio(_, _, _) => {
+                // Skip ratio constraints, display them separately
+            }
+        }
+    }
+
+    // Display achieved ratios
+    for constraint in &constraints {
+        if let Constraint::Ratio(ion1_index, ion2_index, target_ratio) = constraint {
+            let ion1_conc = best_concentrations[*ion1_index];
+            let ion2_conc = best_concentrations[*ion2_index];
+            let achieved_ratio = if ion2_conc > 0.01 {
+                ion1_conc / ion2_conc
+            } else {
+                f32::INFINITY
+            };
+            let status = if (achieved_ratio - target_ratio).abs() < 0.1 {
+                "✓"
+            } else {
+                "✗"
+            };
+            println!("{} : {} {} {}", ions[*ion1_index], ions[*ion2_index], achieved_ratio, status);
+        }
     }
 
     println!("");
