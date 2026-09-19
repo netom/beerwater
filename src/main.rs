@@ -8,9 +8,9 @@ pub use std::{
 
 #[derive(Clone, Debug)]
 enum Constraint {
-    Exact(usize, f32),                 // ion_index, target value
-    Range(usize, f32, f32),            // ion_index, min, max (inclusive)
-    Ratio(usize, usize, f32),          // ion1_index, ion2_index, target_ratio (ion1/ion2)
+    Exact(usize, f32),        // ion_index, target value
+    Range(usize, f32, f32),   // ion_index, min, max (inclusive)
+    Ratio(usize, usize, f32), // ion1_index, ion2_index, target_ratio (ion1/ion2)
 }
 
 fn nudge(eps: f32, qin: &Vec<f32>, qout: &mut Vec<f32>) {
@@ -286,9 +286,7 @@ fn main() {
                         value
                     }
                     Err(parse_error) => {
-                        return Some(Err(format!(
-                            "error parsing target ratio: {parse_error}"
-                        )));
+                        return Some(Err(format!("error parsing target ratio: {parse_error}")));
                     }
                 };
 
@@ -317,9 +315,7 @@ fn main() {
                         value
                     }
                     Err(parse_error) => {
-                        return Some(Err(format!(
-                            "error parsing minimum value: {parse_error}"
-                        )));
+                        return Some(Err(format!("error parsing minimum value: {parse_error}")));
                     }
                 };
 
@@ -331,14 +327,14 @@ fn main() {
                         value
                     }
                     Err(parse_error) => {
-                        return Some(Err(format!(
-                            "error parsing maximum value: {parse_error}"
-                        )));
+                        return Some(Err(format!("error parsing maximum value: {parse_error}")));
                     }
                 };
 
                 if min_value > max_value {
-                    return Some(Err("minimum value is greater than maximum value".to_string()));
+                    return Some(Err(
+                        "minimum value is greater than maximum value".to_string()
+                    ));
                 }
 
                 constraints.push(Constraint::Range(ion_index, min_value, max_value));
@@ -418,7 +414,10 @@ fn main() {
     // Display ratio constraints
     for constraint in &constraints {
         if let Constraint::Ratio(ion1_index, ion2_index, target_ratio) = constraint {
-            println!("{} : {} {}", ions[*ion1_index], ions[*ion2_index], target_ratio);
+            println!(
+                "{} : {} {}",
+                ions[*ion1_index], ions[*ion2_index], target_ratio
+            );
         }
     }
 
@@ -468,7 +467,10 @@ fn main() {
             } else {
                 "✗"
             };
-            println!("{} : {} {} {}", ions[*ion1_index], ions[*ion2_index], achieved_ratio, status);
+            println!(
+                "{} : {} = {} : {} = {} {}",
+                ions[*ion1_index], ions[*ion2_index], ion1_conc, ion2_conc, achieved_ratio, status
+            );
         }
     }
 
