@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use rand_distr::{Distribution, Normal};
 pub use std::{
     fs::{self, File},
@@ -220,7 +220,7 @@ fn main() {
                     Err(parse_error) => {
                         return Some(Err(format!(
                             "parse error at field {field_counter}: {parse_error}"
-                        )))
+                        )));
                     }
                 }
             }
@@ -388,7 +388,7 @@ fn main() {
             best_quantities.copy_from_slice(try_quantities.as_slice());
         }
 
-        if i % 10000 == 0 {
+        if i % 100000 == 0 {
             println!("ERR @{}: {}", i, best_err);
         }
     }
